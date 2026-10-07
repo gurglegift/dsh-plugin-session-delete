@@ -145,8 +145,18 @@ async function stripStorageDomains(ctx, sessionId, { workspace = true } = {}) {
         const g = ws.global
         if (g && typeof g.get === 'function' && typeof g.set === 'function') {
           const state = g.get()
-          if (state && Array.isArray(state.archivedSessionIds) && variants.some((v) => state.archivedSessionIds.includes(v))) {
-            await g.set({ ...state, archivedSessionIds: state.archivedSessionIds.filter((x) => !variants.includes(x)) })
+          let stateChanged = false
+          let nextState = state ? { ...state } : null
+          if (nextState && Array.isArray(nextState.archivedSessionIds) && variants.some((v) => nextState.archivedSessionIds.includes(v))) {
+            nextState.archivedSessionIds = nextState.archivedSessionIds.filter((x) => !variants.includes(x))
+            stateChanged = true
+          }
+          if (nextState && Array.isArray(nextState.pinnedSessionIds) && variants.some((v) => nextState.pinnedSessionIds.includes(v))) {
+            nextState.pinnedSessionIds = nextState.pinnedSessionIds.filter((x) => !variants.includes(x))
+            stateChanged = true
+          }
+          if (stateChanged) {
+            await g.set(nextState)
             workspaceRemoved = true
           }
         }
