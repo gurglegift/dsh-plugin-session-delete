@@ -31,6 +31,9 @@ const name = 'chameleon-session-delete'
 const inject = ['tools']
 
 const SESSION_ID_RE = /^(session-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const CSRF_HEADER = 'x-dsh-plugin'
+const CSRF_VALUE = 'session-delete'
+const inFlight = new Map()
 
 class DeleteError extends Error {
   constructor(message, status) {
@@ -244,38 +247,49 @@ async function deleteSessionCore(ctx, sessionId) {
   if (!SESSION_ID_RE.test(sessionId)) {
     throw new DeleteError(`invalid session id: ${sessionId}`, 400)
   }
-  const stopped = await stopAgentIfRunning(ctx, sessionId)
-  await flushSessionIfLive(ctx, sessionId)
-  const detached = detachLiveSession(ctx, sessionId)
-
-  // Remove every on-disk log directory first.  If the filesystem refuses, fail
-  // before touching workspace accounting so a half-deleted session cannot fall
-  // out of its group into "Ungrouped".
-  const firstDirRemoved = removeSessionDirs(sessionId)
-
-  // Remove projection rows now (they are not the grouping authority), then
-  // sweep again: the dispose path may have been mid-flight and could have
-  // re-created a directory after the first removal.
-  const projStorage = await stripStorageDomains(ctx, sessionId, { workspace: false })
-  const secondDirRemoved = removeSessionDirs(sessionId)
-  await new Promise((resolve) => setImmediate(resolve))
-  const thirdDirRemoved = removeSessionDirs(sessionId)
-
-  const remainingDirs = findSessionDirs(sessionId)
-  if (remainingDirs.length > 0) {
-    throw new DeleteError(`session files could not be fully removed: ${remainingDirs.join(', ')}`, 500)
+  if (inFlight.has(sessionId)) {
+    return inFlight.get(sessionId)
   }
 
-  // Only after the log is confirmed gone do we detach the session from its
-  // workspace/archive accounting.
-  const workspaceStorage = await stripStorageDomains(ctx, sessionId, { workspace: true })
-  const dirRemoved = firstDirRemoved || secondDirRemoved || thirdDirRemoved
-  const projRemoved = projStorage.projRemoved || workspaceStorage.projRemoved
-  const workspaceRemoved = workspaceStorage.workspaceRemoved
-  if (!dirRemoved && !projRemoved && !workspaceRemoved) {
-    throw new DeleteError(`session not found: ${sessionId}`, 404)
-  }
-  return { stopped, detached, dirRemoved, projRemoved, workspaceRemoved }
+  const task = (async () => {
+    const stopped = await stopAgentIfRunning(ctx, sessionId)
+    await flushSessionIfLive(ctx, sessionId)
+    const detached = detachLiveSession(ctx, sessionId)
+
+    // Remove every on-disk log directory first.  If the filesystem refuses, fail
+    // before touching workspace accounting so a half-deleted session cannot fall
+    // out of its group into "Ungrouped".
+    const firstDirRemoved = removeSessionDirs(sessionId)
+
+    // Remove projection rows now (they are not the grouping authority), then
+    // sweep again: the dispose path may have been mid-flight and could have
+    // re-created a directory after the first removal.
+    const projStorage = await stripStorageDomains(ctx, sessionId, { workspace: false })
+    const secondDirRemoved = removeSessionDirs(sessionId)
+    await new Promise((resolve) => setImmediate(resolve))
+    const thirdDirRemoved = removeSessionDirs(sessionId)
+
+    const remainingDirs = findSessionDirs(sessionId)
+    if (remainingDirs.length > 0) {
+      throw new DeleteError(`session files could not be fully removed: ${remainingDirs.join(', ')}`, 500)
+    }
+
+    // Only after the log is confirmed gone do we detach the session from its
+    // workspace/archive accounting.
+    const workspaceStorage = await stripStorageDomains(ctx, sessionId, { workspace: true })
+    const dirRemoved = firstDirRemoved || secondDirRemoved || thirdDirRemoved
+    const projRemoved = projStorage.projRemoved || workspaceStorage.projRemoved
+    const workspaceRemoved = workspaceStorage.workspaceRemoved
+    if (!dirRemoved && !projRemoved && !workspaceRemoved) {
+      throw new DeleteError(`session not found: ${sessionId}`, 404)
+    }
+    return { stopped, detached, dirRemoved, projRemoved, workspaceRemoved }
+  })().finally(() => {
+    inFlight.delete(sessionId)
+  })
+
+  inFlight.set(sessionId, task)
+  return task
 }
 
 // --- session list (for sidebar menu title -> id matching) ----------------------
@@ -363,6 +377,10 @@ function apply(ctx) {
       handler: async (req, res) => {
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        if (req.headers[CSRF_HEADER] !== CSRF_VALUE) {
+          sendJson(res, 403, { error: 'forbidden: missing or invalid plugin request header' })
           return
         }
         let args = {}

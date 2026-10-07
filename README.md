@@ -37,6 +37,9 @@ dsh plugin --profile <profile> add github:gurglegift/dsh-plugin-session-delete
 
 ## 更新日志
 
+- **v0.4.1（安全与并发防御强化）**：
+  - **CSRF 跨站请求头防御**：HTTP 接口与客户端通信强制绑定 `x-dsh-plugin: session-delete` 自定义请求头验证，杜绝浏览器外部恶意网页跨域调用本地端口触发会话删除。
+  - **服务端并发防重锁 (`inFlight` Coalescing)**：同一会话在多路并发或快速连击时自动合并为单次执行，防止并发竞争删除引发的文件系统脏状态。
 - **v0.4.0（现代 DSH 适配）**：
   - **适配现代 DeepSeek Harness (v0.2.0-rc.2+) 插件规范**：移除已废弃的客户端 `@deepseek-ai/dsh-client-runtime` 注入，解决插件加载阻塞问题。
   - **UI 图标动态探测与安全回退**：适配 `@deepseek-ai/dsh-client-ui-primitives` 图标重构，优先解析 `IconTrashOutlineRegular` / `IconTrashOutlineMedium` / `IconTrashOutline`，并内置 16px SVG 图标回退，彻底解决原 `IconTrashOutline16` 未导出引起的白屏。

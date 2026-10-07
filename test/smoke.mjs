@@ -45,12 +45,42 @@ assert.deepStrictEqual(new Set(sessionIdVariants(rawId)), new Set([rawId, prefix
 assert.deepStrictEqual(new Set(sessionIdVariants(prefixedId)), new Set([rawId, prefixedId]))
 console.log('✓ sessionIdVariants logic validated')
 
-// 4. Validate src/client.js bundle registration
+// 4. Validate src/client.js bundle registration and CSRF header
 const clientPath = path.join(rootDir, 'src', 'client.js')
 assert.ok(fs.existsSync(clientPath), 'src/client.js must exist')
 const clientContent = fs.readFileSync(clientPath, 'utf8')
 assert.ok(clientContent.includes("id: 'dsh-plugin-session-delete'"), 'client must register id dsh-plugin-session-delete')
 assert.ok(!clientContent.includes('IconTrashOutline16,'), 'client must not directly destructure IconTrashOutline16')
+assert.ok(clientContent.includes("'x-dsh-plugin': 'session-delete'"), 'client must send x-dsh-plugin header')
 console.log('✓ src/client.js validated')
 
-console.log('All smoke tests passed!')
+// 5. Validate src/index.js security protections
+const indexPath = path.join(rootDir, 'src', 'index.js')
+assert.ok(fs.existsSync(indexPath), 'src/index.js must exist')
+const indexContent = fs.readFileSync(indexPath, 'utf8')
+assert.ok(indexContent.includes("const CSRF_HEADER = 'x-dsh-plugin'"), 'index.js must define CSRF_HEADER')
+assert.ok(indexContent.includes("const inFlight = new Map()"), 'index.js must define inFlight map')
+assert.ok(indexContent.includes("req.headers[CSRF_HEADER] !== CSRF_VALUE"), 'index.js must check CSRF header')
+assert.ok(indexContent.includes("inFlight.has(sessionId)"), 'index.js must check inFlight coalescing')
+console.log('✓ src/index.js security defenses validated')
+
+// 6. Test in-flight coalescing behavior simulation
+const inFlight = new Map()
+let executionCount = 0
+async function simulatedDelete(id) {
+  if (inFlight.has(id)) return inFlight.get(id)
+  const task = (async () => {
+    executionCount++
+    await new Promise((r) => setTimeout(r, 20))
+    return { ok: true, id }
+  })().finally(() => inFlight.delete(id))
+  inFlight.set(id, task)
+  return task
+}
+
+const [resA, resB] = await Promise.all([simulatedDelete('s1'), simulatedDelete('s1')])
+assert.strictEqual(executionCount, 1, 'concurrent requests for same session must coalesce into 1 execution')
+assert.deepStrictEqual(resA, resB)
+console.log('✓ inFlight coalescing simulation validated')
+
+console.log('All smoke tests passed successfully!')

@@ -331,7 +331,10 @@ window.__ModuleLoader__.load({
         setError(null)
         fetch('/__chameleon/session/delete', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            'x-dsh-plugin': 'session-delete',
+          },
           body: JSON.stringify({ sessionId: target.sessionId }),
         })
           .then(async (res) => {
