@@ -60,6 +60,8 @@ window.__ModuleLoader__.load({
       'dialog.sessionId': '序列号：',
       'dialog.runningWarn': '⚠ 会话正在运行',
       'dialog.ack': '我已了解后果，确认删除',
+      'dialog.rememberAck': '记住此选项',
+      'dialog.rememberAckTip': '下次删除时自动勾选确认',
       'dialog.notFoundDesc': '未能在会话列表中找到该会话（可能已被删除或列表尚未刷新），请刷新后重试。',
       'dialog.runningDesc': '该会话正在运行，删除会立即停止其任务并永久删除，正在进行的操作将中断且无法恢复。',
       'dialog.deleteDesc': '将永久删除该会话及其全部对话记录（会话日志、统计与工作区记账），此操作不可恢复。',
@@ -79,6 +81,8 @@ window.__ModuleLoader__.load({
       'dialog.sessionId': 'Session ID: ',
       'dialog.runningWarn': '⚠ Session is running',
       'dialog.ack': 'I understand the consequences. Confirm deletion',
+      'dialog.rememberAck': 'Remember this option',
+      'dialog.rememberAckTip': 'Automatically check confirmation for future deletions',
       'dialog.notFoundDesc': 'Could not find this session in the session list (it may have been deleted or the list has not refreshed yet). Please refresh and try again.',
       'dialog.runningDesc': 'This session is running. Deleting it will stop its task immediately and remove it permanently; any work in progress will be interrupted and cannot be recovered.',
       'dialog.deleteDesc': 'This will permanently delete the session and all of its conversation records (session log, statistics and workspace accounting). This action cannot be undone.',
@@ -132,14 +136,35 @@ window.__ModuleLoader__.load({
       marginTop: 8,
     }
 
-    const optStyle = {
+    const ackRowStyle = {
       display: 'flex',
       alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
       gap: 8,
+      marginTop: 10,
+    }
+
+    const ackOptStyle = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
       fontSize: 13,
       lineHeight: '20px',
       color: 'var(--dsw-alias-label-primary, inherit)',
-      marginTop: 10,
+      cursor: 'pointer',
+      userSelect: 'none',
+    }
+
+    const rememberOptStyle = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      fontSize: 12,
+      lineHeight: '20px',
+      color: 'var(--dsw-alias-label-secondary, #8a8a8e)',
+      cursor: 'pointer',
+      userSelect: 'none',
     }
 
     const cancelBtnStyle = {
@@ -260,11 +285,34 @@ window.__ModuleLoader__.load({
       return null
     }
 
+    const STORAGE_KEY_REMEMBER_ACK = 'dsh-plugin-session-delete:remember-ack'
+
+    function getStoredRememberAck() {
+      try {
+        return typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_REMEMBER_ACK) === 'true'
+      } catch {
+        return false
+      }
+    }
+
+    function setStoredRememberAck(val) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          if (val) {
+            localStorage.setItem(STORAGE_KEY_REMEMBER_ACK, 'true')
+          } else {
+            localStorage.removeItem(STORAGE_KEY_REMEMBER_ACK)
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
     function DeleteSessionDialog(props) {
       const t = (props && props.t) || __t
       useLocaleRevision()
       const [target, setTarget] = useState(null) // {sessionId, title, running, notFound}
-      const [acknowledged, setAcknowledged] = useState(false)
+      const [rememberAck, setRememberAck] = useState(() => getStoredRememberAck())
+      const [acknowledged, setAcknowledged] = useState(() => getStoredRememberAck())
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState(null)
 
@@ -272,9 +320,11 @@ window.__ModuleLoader__.load({
         const handler = (e) => {
           const d = e && e.detail ? e.detail : {}
           const resolved = resolveTargetFromStore(d)
+          const remembered = getStoredRememberAck()
           if (resolved) {
             setTarget(resolved)
-            setAcknowledged(false)
+            setRememberAck(remembered)
+            setAcknowledged(remembered)
             setError(null)
             setBusy(false)
             return
@@ -299,18 +349,22 @@ window.__ModuleLoader__.load({
                   }
                 }
               }
+              const rememberedNow = getStoredRememberAck()
               if (m) {
                 setTarget({ sessionId: m.sessionId, title: m.title, running: m.running === true })
               } else {
                 setTarget({ sessionId: null, title: want, running: false, notFound: true })
               }
-              setAcknowledged(false)
+              setRememberAck(rememberedNow)
+              setAcknowledged(rememberedNow)
               setError(null)
               setBusy(false)
             })
             .catch(function () {
+              const rememberedNow = getStoredRememberAck()
               setTarget({ sessionId: null, title: want, running: false, notFound: true })
-              setAcknowledged(false)
+              setRememberAck(rememberedNow)
+              setAcknowledged(rememberedNow)
               setError(null)
               setBusy(false)
             })
@@ -449,14 +503,42 @@ window.__ModuleLoader__.load({
         target.running
           ? React.createElement('div', { key: 'warn', style: warnStyle }, t('dialog.runningWarn'))
           : null,
-        React.createElement('label', { key: 'ack', style: optStyle },
-          React.createElement('input', {
-            type: 'checkbox',
-            checked: acknowledged,
-            disabled: busy,
-            onChange: (e) => setAcknowledged(e.target.checked),
-          }),
-          t('dialog.ack')),
+        React.createElement('div', { key: 'ack-row', style: ackRowStyle }, [
+          React.createElement('label', { key: 'ack', style: ackOptStyle },
+            React.createElement('input', {
+              type: 'checkbox',
+              checked: acknowledged,
+              disabled: busy,
+              onChange: (e) => {
+                const checked = e.target.checked
+                setAcknowledged(checked)
+                if (!checked && rememberAck) {
+                  setRememberAck(false)
+                  setStoredRememberAck(false)
+                }
+              },
+            }),
+            t('dialog.ack')),
+          React.createElement('label', {
+            key: 'remember',
+            style: rememberOptStyle,
+            title: t('dialog.rememberAckTip'),
+          },
+            React.createElement('input', {
+              type: 'checkbox',
+              checked: rememberAck,
+              disabled: busy,
+              onChange: (e) => {
+                const checked = e.target.checked
+                setRememberAck(checked)
+                setStoredRememberAck(checked)
+                if (checked) {
+                  setAcknowledged(true)
+                }
+              },
+            }),
+            t('dialog.rememberAck')),
+        ]),
         busy ? React.createElement('div', { key: 'busy', style: statusStyle }, t('dialog.deleting')) : null,
         error ? React.createElement('div', { key: 'err', style: errStyle, role: 'alert' }, error) : null,
       ])

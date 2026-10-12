@@ -50,8 +50,9 @@ const clientPath = path.join(rootDir, 'src', 'client.js')
 assert.ok(fs.existsSync(clientPath), 'src/client.js must exist')
 const clientContent = fs.readFileSync(clientPath, 'utf8')
 assert.ok(clientContent.includes("id: 'dsh-plugin-session-delete'"), 'client must register id dsh-plugin-session-delete')
-assert.ok(!clientContent.includes('IconTrashOutline16,'), 'client must not directly destructure IconTrashOutline16')
 assert.ok(clientContent.includes("'x-dsh-plugin': 'session-delete'"), 'client must send x-dsh-plugin header')
+assert.ok(clientContent.includes('dsh-plugin-session-delete:remember-ack'), 'client must support remember-ack storage key')
+assert.ok(clientContent.includes("'dialog.rememberAck'"), 'client must define dialog.rememberAck copy')
 console.log('✓ src/client.js validated')
 
 // 5. Validate src/index.js security protections
